@@ -78,6 +78,9 @@ TMetadata *TMetadataProto::BuildMetadataFromResponse(const void *response_buf,
   while (reader.NextBroker()) {
     name.assign(reader.GetCurrentBrokerHostBegin(),
         reader.GetCurrentBrokerHostEnd());
+    syslog(LOG_ERR, "=== broker [%s] port %u node id %d ===", name.c_str(),
+        static_cast<unsigned>(reader.GetCurrentBrokerPort()),
+        static_cast<int>(reader.GetCurrentBrokerNodeId()));
     builder.AddBroker(reader.GetCurrentBrokerNodeId(), std::move(name),
         reader.GetCurrentBrokerPort());
   }
@@ -95,9 +98,18 @@ TMetadata *TMetadataProto::BuildMetadataFromResponse(const void *response_buf,
 
     while (reader.NextPartitionInTopic()) {
       int16_t error_code = reader.GetCurrentPartitionErrorCode();
-      builder.AddPartitionToTopic(reader.GetCurrentPartitionId(),
-          reader.GetCurrentPartitionLeaderId(),
-          CanSendToPartition(error_code), error_code);
+
+      try {
+        builder.AddPartitionToTopic(reader.GetCurrentPartitionId(),
+            reader.GetCurrentPartitionLeaderId(),
+            CanSendToPartition(error_code), error_code);
+      } catch (const TMetadata::TPartitionHasUnknownBroker &) {
+        syslog(LOG_ERR, "=== topic [%s] partition %lu leader %lu error_code %d ===",
+            name.c_str(), static_cast<unsigned long>(reader.GetCurrentPartitionId()),
+            static_cast<unsigned long>(reader.GetCurrentPartitionLeaderId()),
+            static_cast<int>(error_code));
+        throw;
+      }
     }
 
     builder.CloseTopic();
